@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PHANTOM DJ — Air Turntable</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:     #000005;
+  --panel:  #02020f;
+  --border: #0d0d28;
+  --border2:#181838;
+
+  --cyan:   #00f5ff;
+  --pink:   #ff0080;
+  --green:  #00ff88;
+  --amber:  #ffaa00;
+  --white:  #e0e8ff;
+
+  --l-color: var(--cyan);
+  --r-color: var(--pink);
+}
+
+html, body { height: 100%; overflow: hidden; background: var(--bg); }
+
+body {
+  font-family: 'Share Tech Mono', monospace;
+  color: var(--white);
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  height: 100vh;
+}
+
+/* CRT scanlines */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent, transparent 2px,
+    rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px
+  );
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* Vignette */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse 90% 85% at 50% 50%, transparent 50%, rgba(0,0,5,0.7) 100%);
+  pointer-events: none;
+  z-index: 9997;
+}
+
+/* ── HEADER ──────────────────────────────────── */
+header {
+  position: relative; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 1.5rem;
+  background: #000005;
+  border-bottom: 1px solid var(--border2);
+}
+
+.logo {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  font-size: 1.1rem;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+  text-shadow: 0 0 20px var(--cyan), 0 0 40px rgba(0,245,255,0.3);
+}
+
+.header-meta {
+  font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase;
+  color: #555875;
+}
+
+.header-chips {
+  display: flex; align-items: center; gap: 10px;
+}
+
+.hchip {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.46rem; letter-spacing: 0.16em; text-transform: uppercase;
+  border: 1px solid var(--border2); padding: 3px 10px;
+  color: #444; transition: all 0.3s;
+}
+.hchip .pip { width: 5px; height: 5px; border-radius: 50%; background: #222; transition: all 0.3s; }
+.hchip.on { color: var(--cyan); border-color: rgba(0,245,255,0.3); }
+.hchip.on .pip { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: blink 1.2s infinite; }
+.hchip#chip-r.on { color: var(--pink); border-color: rgba(255,0,128,0.3); }
+.hchip#chip-r.on .pip { background: var(--pink); box-shadow: 0 0 8px var(--pink); }
+
+@keyframes blink { 0%,100%{opacity:1}50%{opacity:0.2} }
+
+/* ── MAIN LAYOUT ─────────────────────────────── */
+.studio {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 280px 1fr 280px;
+  overflow: hidden;
+}
+
+/* ── LEFT DECK ───────────────────────────────── */
+.deck {
+  background: var(--panel);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.deck.left  { border-right: 1px solid var(--border2); }
+.deck.right { border-left: 1px solid var(--border2); }
+
+.deck-header {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.deck-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.deck-title.l { color: var(--cyan); text-shadow: 0 0 12px var(--cyan); }
+.deck-title.r { color: var(--pink); text-shadow: 0 0 12px var(--pink); }
+
+/* VU meter */
+.vu-wrap {
+  display: flex; gap: 2px; align-items: flex-end;
+  height: 20px;
+}
+.vu-bar {
+  width: 4px; border-radius: 1px;
+  transition: height 0.06s ease;
+}
+
+/* Turntable vinyl */
+.vinyl-wrap {
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  flex-shrink: 0;
+}
+
+.vinyl-outer {
+  position: relative;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+}
+
+canvas.vinyl-canvas {
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  display: block;
+}
+
+/* BPM knob */
+.bpm-display {
+  text-align: center;
+  padding: 0 14px 10px;
+  flex-shrink: 0;
+}
+.bpm-num {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2.2rem; font-weight: 900;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  transition: color 0.3s;
+}
+.bpm-label {
+  font-size: 0.44rem; letter-spacing: 0.25em; text-transform: uppercase;
+  color: #555; margin-top: 2px;
+}
+
+/* Knobs row */
+.knobs-row {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 6px; padding: 0 12px 10px;
+  flex-shrink: 0;
+}
+
+.knob-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+}
+
+canvas.knob-canvas {
+  width: 54px; height: 54px;
+  display: block;
+}
+
+.knob-label {
+  font-size: 0.42rem; letter-spacing: 0.16em; text-transform: uppercase;
+  color: #666;
+}
+.knob-val {
+  font-size: 0.5rem; letter-spacing: 0.08em;
+  color: var(--white);
+}
+
+/* Beat pads */
+.pads-section {
+  padding: 8px 12px 10px;
+  flex-shrink: 0;
+}
+
+.pads-label {
+  font-size: 0.42rem; letter-spacing: 0.2em; text-transform: uppercase;
+  color: #444; margin-bottom: 6px;
+}
+
+.pads-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.pad {
+  height: 28px;
+  border: 1px solid;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.06s;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.45rem;
+  letter-spacing: 0.05em;
+  font-weight: bold;
+}
+.pad::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity 0.06s;
+}
+.pad.hit::after { opacity: 0.4; }
+
+/* Oscilloscope */
+.osc-section {
+  flex: 1; min-height: 0;
+  position: relative;
+  border-top: 1px solid var(--border);
+}
+canvas.osc-canvas {
+  width: 100%; height: 100%; display: block;
+}
+
+/* Hand gesture status */
+.gesture-status {
+  padding: 6px 12px 8px;
+  font-size: 0.46rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: #444;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 28px;
+  transition: color 0.2s;
+}
+.gesture-status.active-l { color: var(--cyan); }
+.gesture-status.active-r { color: var(--pink); }
+
+/* ── CENTER: CAMERA + VISUALIZER ─────────────── */
+.center-section {
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: #000;
+}
+
+video { display: none; }
+
+canvas#cam-canvas {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scaleX(-1);
+  filter: brightness(0.55) saturate(0.3) contrast(1.25);
+  flex: 1;
+  min-height: 0;
+}
+
+canvas#hand-canvas {
+  position: absolute;
+  inset: 0; width: 100%; height: 100%;
+  pointer-events: none;
+  transform: scaleX(-1);
+}
+
+/* Center HUD */
+.hud-zone {
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 5;
+}
+
+/* Control zones drawn on camera */
+.zone-label {
+  position: absolute;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.55rem; font-weight: 700; letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.4; pointer-events: none;
+}
+
+/* Big beat flash */
+.beat-flash {
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 4;
+  opacity: 0;
+  transition: opacity 0.04s;
+}
+.beat-flash.l { background: radial-gradient(ellipse 60% 60% at 30% 50%, rgba(0,245,255,0.12), transparent); }
+.beat-flash.r { background: radial-gradient(ellipse 60% 60% at 70% 50%, rgba(255,0,128,0.12), transparent); }
+.beat-flash.show { opacity: 1; }
+
+/* Master waveform at bottom */
+.master-wave {
+  flex-shrink: 0;
+  height: 64px;
+  border-top: 1px solid var(--border2);
+  background: #000010;
+  position: relative;
+}
+canvas#master-canvas { width: 100%; height: 100%; display: block; }
+
+/* Loading overlay */
+#loading {
+  position: absolute; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1.4rem; z-index: 50;
+  transition: opacity 0.7s;
+}
+#loading.gone { opacity: 0; pointer-events: none; }
+
+.load-logo {
+  font-family: 'Orbitron', sans-serif; font-weight: 900;
+  font-size: 2.8rem; letter-spacing: 0.3em;
+  color: var(--cyan);
+  text-shadow: 0 0 40px var(--cyan), 0 0 80px rgba(0,245,255,0.3);
+  animation: logo-glow 1.5s ease-in-out infinite alternate;
+}
+@keyframes logo-glow {
+  from { text-shadow: 0 0 20px var(--cyan); }
+  to   { text-shadow: 0 0 60px var(--cyan), 0 0 100px rgba(0,245,255,0.4); }
+}
+
+.load-msg { font-size: 0.52rem; letter-spacing: 0.2em; text-transform: uppercase; color: #555; }
+.load-bar { width: 240px; height: 1px; background: var(--border2); overflow: hidden; }
+.load-fill { height: 100%; background: var(--cyan); width: 0%; animation: lf 3s ease forwards; box-shadow: 0 0 8px var(--cyan); }
+@keyframes lf { to { width: 100%; } }
+
+.no-hand-msg {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 4; pointer-events: none;
+  opacity: 0; transition: opacity 0.4s;
+  flex-direction: column; gap: 10px;
+}
+.no-hand-msg.show { opacity: 1; }
+.no-hand-inner {
+  font-family: 'Orbitron', sans-serif; font-size: 0.75rem; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgba(0,245,255,0.25); text-align: center; line-height: 1.8;
+}
+
+/* Instructions overlay */
+.instructions {
+  position: absolute;
+  bottom: 80px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 6; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.instr-row {
+  font-size: 0.44rem; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 3px 12px;
+  border-radius: 1px;
+  white-space: nowrap;
+}
+.instr-row.l { background: rgba(0,245,255,0.08); color: rgba(0,245,255,0.5); border: 1px solid rgba(0,245,255,0.15); }
+.instr-row.r { background: rgba(255,0,128,0.08); color: rgba(255,0,128,0.5); border: 1px solid rgba(255,0,128,0.15); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">PHANTOM DJ</div>
+  <div class="header-meta">Air Turntable · MediaPipe Hands · Web Audio API</div>
+  <div class="header-chips">
+    <div class="hchip" id="chip-cam"><div class="pip"></div><span id="chip-cam-txt">Offline</span></div>
+    <div class="hchip" id="chip-l"><div class="pip"></div><span id="chip-l-txt">L Hand</span></div>
+    <div class="hchip" id="chip-r"><div class="pip"></div><span id="chip-r-txt">R Hand</span></div>
+  </div>
+</header>
+
+<div class="studio">
+
+  <!-- LEFT DECK (controlled by LEFT hand) -->
+  <div class="deck left" id="deck-l">
+    <div class="deck-header">
+      <div class="deck-title l">DECK A</div>
+      <div class="vu-wrap" id="vu-l"></div>
+    </div>
+
+    <div class="vinyl-wrap">
+      <div class="vinyl-outer">
+        <canvas class="vinyl-canvas" id="vinyl-l" width="200" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="bpm-display">
+      <div class="bpm-num" id="bpm-l" style="color:var(--cyan)">120</div>
+      <div class="bpm-label">BPM · LEFT HAND Y</div>
+    </div>
+
+    <div class="knobs-row">
+      <div class="knob-wrap">
+        <canvas class="knob-canvas" id="knob-l-bass" width="60" height="60"></canvas>
+        <div class="knob-label">BASS</div>
+        <div class="knob-val" id="kv-l-bass">0dB</div>
+      </div>
+      <div class="knob-wrap">
+        <canvas class="knob-canvas" id="knob-l-mid" width="60" height="60"></canvas>
+        <div class="knob-label">MID</div>
+        <div class="knob-val" id="kv-l-mid">0dB</div>
+      </div>
+      <div class="knob-wrap">
+        <canvas class="knob-canvas" id="knob-l-hi" width="60" height="60"></canvas>
+        <div class="knob-label">HI</div>
+        <div class="knob-val" id="kv-l-hi">0dB</div>
+      </div>
+    </div>
+
+    <div class="pads-section">
+      <div class="pads-label">Beat Pads</div>
+      <div class="pads-grid" id="pads-l"></div>
+    </div>
+
+    <div class="osc-section">
+      <canvas class="osc-canvas" id="osc-l"></canvas>
+    </div>
+
+    <div class="gesture-status" id="gs-l">LEFT HAND: PINCH BPM · SWIPE LOOP</div>
+  </div>
+
+  <!-- CENTER: Camera + Visualizer -->
+  <div class="center-section">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="cam-canvas"></canvas>
+    <canvas id="hand-canvas"></canvas>
+
+    <div class="hud-zone">
+      <div class="zone-label" style="top:12px;left:14px;color:var(--cyan)">LEFT HAND ZONE</div>
+      <div class="zone-label" style="top:12px;right:14px;color:var(--pink)">RIGHT HAND ZONE</div>
+    </div>
+
+    <div class="beat-flash l" id="flash-l"></div>
+    <div class="beat-flash r" id="flash-r"></div>
+
+    <div class="no-hand-msg" id="no-hand-msg">
+      <div class="no-hand-inner">RAISE BOTH HANDS<br>TO TAKE CONTROL</div>
+    </div>
+
+    <div class="instructions" id="instructions">
+      <div class="instr-row l">LEFT: Y = BPM · X = BASS · PINCH = LOOP TOGGLE</div>
+      <div class="instr-row r">RIGHT: Y = VOLUME · X = FX MIX · PINCH = DROP TOGGLE</div>
+    </div>
+
+    <div class="master-wave">
+      <canvas id="master-canvas"></canvas>
+    </div>
+
+    <div id="loading">
+      <div class="load-logo">PHANTOM</div>
+      <div class="load-msg" id="load-msg">Loading AI Hand Tracking…</div>
+      <div class="load-bar"><div class="load-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- RIGHT DECK (controlled by RIGHT hand) -->
+  <div class="deck right" id="deck-r">
+    <div class="deck-header">
+      <div class="deck-title r">DECK B</div>
+      <div class="vu-wrap" id="vu-r"></div>
+    </div>
+
+    <div class="vinyl-wrap">
+      <div class="vinyl-outer">
+        <canvas class="vinyl-canvas" id="vinyl-r" width="200" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="bpm-display">
+      <div class="bpm-num" id="bpm-r" style="color:var(--pink)">128</div>
+      <div class="bpm-label">BPM · RIGHT HAND Y</div>
+    </div>
+
+    <div class="knobs-row">
+      <div class="knob-wrap">
+        <canvas class="knob-canvas" id="knob-r-bass" width="60" height="60"></canvas>
+        <div class="knob-label">VOL</div>
+        <div class="knob-val" id="kv-r-bass">75%</div>
+      </div>
+      <div class="knob-wrap">
+        <canvas class="knob-canvas" id="knob-r-mid" width="60" height="60"></canvas>
+        <div class="knob-label">FX MIX</div>
+        <div class="knob-val" id="kv-r-mid">50%</div>
+      </div>
+      <div class="knob-wrap">
+        <canvas class="knob-canvas" id="knob-r-hi" width="60" height="60"></canvas>
+        <div class="knob-label">DELAY</div>
+        <div class="knob-val" id="kv-r-hi">0.30s</div>
+      </div>
+    </div>
+
+    <div class="pads-section">
+      <div class="pads-label">Beat Pads</div>
+      <div class="pads-grid" id="pads-r"></div>
+    </div>
+
+    <div class="osc-section">
+      <canvas class="osc-canvas" id="osc-r"></canvas>
+    </div>
+
+    <div class="gesture-status" id="gs-r">RIGHT HAND: Y = VOL · X = FX · PINCH = DROP</div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// WEB AUDIO ENGINE
+// ════════════════════════════════════════════════════════
+let audioCtx = null;
+let deckLNodes = null;
+let deckRNodes = null;
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Setup Deck L Audio Nodes: input -> bass -> mid -> hi -> gain -> destination
+    deckLNodes = {};
+    
+    deckLNodes.bassFilter = audioCtx.createBiquadFilter();
+    deckLNodes.bassFilter.type = 'lowshelf';
+    deckLNodes.bassFilter.frequency.value = 220;
+    deckLNodes.bassFilter.gain.value = 0;
+
+    deckLNodes.midFilter = audioCtx.createBiquadFilter();
+    deckLNodes.midFilter.type = 'peaking';
+    deckLNodes.midFilter.frequency.value = 1000;
+    deckLNodes.midFilter.Q.value = 1.0;
+    deckLNodes.midFilter.gain.value = 0;
+
+    deckLNodes.hiFilter = audioCtx.createBiquadFilter();
+    deckLNodes.hiFilter.type = 'highshelf';
+    deckLNodes.hiFilter.frequency.value = 4500;
+    deckLNodes.hiFilter.gain.value = 0;
+
+    deckLNodes.gain = audioCtx.createGain();
+    deckLNodes.gain.gain.value = deckL.volume;
+
+    deckLNodes.bassFilter.connect(deckLNodes.midFilter);
+    deckLNodes.midFilter.connect(deckLNodes.hiFilter);
+    deckLNodes.hiFilter.connect(deckLNodes.gain);
+    deckLNodes.gain.connect(audioCtx.destination);
+
+    // Setup Deck R Audio Nodes:
+    deckRNodes = {};
+
+    deckRNodes.input = audioCtx.createGain();
+    
+    deckRNodes.dryGain = audioCtx.createGain();
+    deckRNodes.wetGain = audioCtx.createGain();
+    
+    deckRNodes.delay = audioCtx.createDelay(1.5);
+    deckRNodes.delay.delayTime.value = deckR.delayTime;
+    
+    deckRNodes.delayFeedback = audioCtx.createGain();
+    deckRNodes.delayFeedback.gain.value = 0.45;
+
+    deckRNodes.gain = audioCtx.createGain();
+    deckRNodes.gain.gain.value = deckR.volume;
+
+    // Routing
+    deckRNodes.input.connect(deckRNodes.dryGain);
+    deckRNodes.input.connect(deckRNodes.delay);
+    
+    // Feedback loop
+    deckRNodes.delay.connect(deckRNodes.delayFeedback);
+    deckRNodes.delayFeedback.connect(deckRNodes.delay);
+    
+    deckRNodes.delay.connect(deckRNodes.wetGain);
+
+    deckRNodes.dryGain.connect(deckRNodes.gain);
+    deckRNodes.wetGain.connect(deckRNodes.gain);
+    deckRNodes.gain.connect(audioCtx.destination);
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}
+
+// Drum synthesizers
+function makeDrums(color) {
+  const patterns = {
+    kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    hihat: [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    clave: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+  };
+  return {
+    patterns,
+    active: { kick: true, snare: true, hihat: true, clave: false },
+    step: 0,
+    bpm: color === 'cyan' ? 120 : 128,
+    volume: 0.75,
+    bass: 0.5,
+    mid: 0.5,
+    hi: 0.5,
+    fxDry: 0.5,
+    delayTime: 0.3,
+  };
+}
+
+const deckL = makeDrums('cyan');
+const deckR = makeDrums('pink');
+
+function playKick(when, dest, vol = 0.8) {
+  if (!audioCtx || !dest) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 180;
+  
+  osc.connect(lp); lp.connect(gain); gain.connect(dest);
+  
+  osc.frequency.setValueAtTime(140, when);
+  osc.frequency.exponentialRampToValueAtTime(38, when + 0.14);
+  
+  gain.gain.setValueAtTime(vol, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.32);
+  
+  osc.start(when); osc.stop(when + 0.33);
+}
+
+function playSnare(when, dest, vol = 0.5) {
+  if (!audioCtx || !dest) return;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.25, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) {
+    d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const hp = audioCtx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 1100;
+  const gain = audioCtx.createGain();
+  
+  src.connect(hp); hp.connect(gain); gain.connect(dest);
+  
+  gain.gain.setValueAtTime(vol, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.2);
+  
+  src.start(when); src.stop(when + 0.21);
+}
+
+function playHihat(when, dest, vol = 0.3, open = false) {
+  if (!audioCtx || !dest) return;
+  const dur = open ? 0.28 : 0.04;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) {
+    d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.6);
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const hp = audioCtx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 7500;
+  const gain = audioCtx.createGain();
+  
+  src.connect(hp); hp.connect(gain); gain.connect(dest);
+  
+  gain.gain.setValueAtTime(vol, when); 
+  gain.gain.exponentialRampToValueAtTime(0.001, when + dur);
+  
+  src.start(when); src.stop(when + dur + 0.005);
+}
+
+function playClave(when, dest, vol = 0.5) {
+  if (!audioCtx || !dest) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 1350;
+  
+  osc.connect(gain); gain.connect(dest);
+  
+  gain.gain.setValueAtTime(vol, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.04);
+  
+  osc.start(when); osc.stop(when + 0.05);
+}
+
+// Sequencer engine
+const SEQ = { l: { running: false, timer: null }, r: { running: false, timer: null } };
+
+function startSequencer(deck, side) {
+  if (SEQ[side].running) return;
+  SEQ[side].running = true;
+  vinylState[side].dirty = true;
+  oscDirty[side] = true;
+  masterDirty = true;
+  
+  function tick() {
+    if (!SEQ[side].running) return;
+    ensureAudio();
+    
+    const now = audioCtx.currentTime;
+    const step = deck.step;
+    const dest = side === 'l' ? deckLNodes?.bassFilter : deckRNodes?.input;
+
+    if (dest) {
+      if (deck.active.kick   && deck.patterns.kick[step])  playKick(now, dest, 0.75);
+      if (deck.active.snare  && deck.patterns.snare[step])  playSnare(now, dest, 0.45);
+      if (deck.active.hihat  && deck.patterns.hihat[step])  playHihat(now, dest, 0.25, step % 8 === 4);
+      if (deck.active.clave  && deck.patterns.clave[step])  playClave(now, dest, 0.4);
+    }
+
+    deck.step = (deck.step + 1) % 16;
+
+    // Flash on beat
+    if (step % 4 === 0) {
+      const fl = document.getElementById(`flash-${side}`);
+      fl.classList.add('show');
+      setTimeout(() => fl.classList.remove('show'), 80);
+    }
+
+    // Highlight pad
+    updatePadHighlight(side, step);
+
+    const interval = (60 / deck.bpm / 4) * 1000;
+    SEQ[side].timer = setTimeout(tick, interval);
+  }
+  tick();
+}
+
+function stopSequencer(side) {
+  SEQ[side].running = false;
+  clearTimeout(SEQ[side].timer);
+  vinylState[side].dirty = true;
+  oscDirty[side] = true;
+  masterDirty = true;
+  updateAudioParameters();
+}
+
+// ════════════════════════════════════════════════════════
+// BUILD PADS
+// ════════════════════════════════════════════════════════
+function buildPads(containerId, side, color) {
+  const cont = document.getElementById(containerId);
+  const names = ['KICK','SNARE','HIHAT','CLAVE'];
+  const colors = [color, '#ffaa00', '#00ff88', '#aa44ff'];
+  
+  names.forEach((name, i) => {
+    const pad = document.createElement('div');
+    pad.className = 'pad';
+    pad.id = `pad-${side}-${i}`;
+    pad.style.borderColor = colors[i] + '44';
+    pad.style.color = colors[i];
+    pad.style.background = colors[i] + '11';
+    pad.textContent = name;
+    
+    const key = name.toLowerCase();
+    const deck = side === 'l' ? deckL : deckR;
+    
+    if (deck.active[key]) {
+      pad.style.background = colors[i] + '22';
+      pad.style.borderColor = colors[i] + '88';
+    }
+    
+    pad.addEventListener('click', () => {
+      ensureAudio();
+      deck.active[key] = !deck.active[key];
+      pad.style.background = deck.active[key] ? colors[i] + '22' : colors[i] + '11';
+      pad.style.borderColor = deck.active[key] ? colors[i] + '88' : colors[i] + '44';
+    });
+    cont.appendChild(pad);
+  });
+}
+
+function updatePadHighlight(side, step) {
+  const deck = side === 'l' ? deckL : deckR;
+  const instruments = ['kick', 'snare', 'hihat', 'clave'];
+  instruments.forEach((inst, idx) => {
+    if (deck.active[inst] && deck.patterns[inst][step]) {
+      const pad = document.getElementById(`pad-${side}-${idx}`);
+      if (pad) {
+        pad.classList.add('hit');
+        setTimeout(() => pad.classList.remove('hit'), 100);
+      }
+    }
+  });
+}
+
+buildPads('pads-l', 'l', '#00f5ff');
+buildPads('pads-r', 'r', '#ff0080');
+
+// ════════════════════════════════════════════════════════
+// VINYL RENDERER
+// ════════════════════════════════════════════════════════
+const vinylState = { l: { angle: 0, dirty: true }, r: { angle: 0, dirty: true } };
+
+function drawVinyl(side, deck) {
+  const canvas = document.getElementById(`vinyl-${side}`);
+  const ctx = canvas.getContext('2d');
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const R = cx - 4;
+  const color = side === 'l' ? '#00f5ff' : '#ff0080';
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Rotate
+  const speed = SEQ[side].running ? (deck.bpm / 120) : 0;
+  vinylState[side].angle += (0.02 * speed);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(vinylState[side].angle);
+
+  // Vinyl body
+  const vGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+  vGrad.addColorStop(0, '#111');
+  vGrad.addColorStop(0.15, '#0a0a0a');
+  vGrad.addColorStop(1, '#050505');
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI*2);
+  ctx.fillStyle = vGrad; ctx.fill();
+
+  // Grooves
+  for (let r = 20; r < R - 8; r += 5) {
+    const alpha = 0.03 + (r / R) * 0.04;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  // Colored sector highlight
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.arc(0, 0, R - 8, 0, Math.PI * 0.4);
+  ctx.closePath();
+  ctx.fillStyle = `${color}18`;
+  ctx.fill();
+
+  ctx.restore();
+
+  // Center label
+  const lGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 22);
+  lGrad.addColorStop(0, color + '44');
+  lGrad.addColorStop(1, '#111');
+  ctx.beginPath(); ctx.arc(cx, cy, 20, 0, Math.PI*2);
+  ctx.fillStyle = lGrad; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2);
+  ctx.fillStyle = '#333'; ctx.fill();
+
+  // Glow ring
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
+  ctx.strokeStyle = color + '33'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Beat pulse
+  if (SEQ[side].running) {
+    const pulse = Math.sin(Date.now() / (60000 / deck.bpm / 4)) * 0.5 + 0.5;
+    ctx.beginPath(); ctx.arc(cx, cy, R + 2, 0, Math.PI*2);
+    ctx.strokeStyle = `${color}${Math.round(pulse * 40).toString(16).padStart(2,'0')}`;
+    ctx.lineWidth = 3; ctx.stroke();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// KNOB RENDERER
+// ════════════════════════════════════════════════════════
+function drawKnob(canvasId, value, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const cx = 30, cy = 30, R = 20;
+  ctx.clearRect(0, 0, 60, 60);
+
+  // Track
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0.75*Math.PI, 0.25*Math.PI);
+  ctx.strokeStyle = '#111124'; ctx.lineWidth = 4; ctx.stroke();
+
+  // Value arc
+  const startAngle = 0.75 * Math.PI;
+  const endAngle   = startAngle + value * 1.5 * Math.PI;
+  ctx.beginPath(); ctx.arc(cx, cy, R, startAngle, endAngle);
+  ctx.strokeStyle = color; ctx.lineWidth = 4;
+  ctx.stroke();
+
+  // Dot indicator
+  ctx.beginPath();
+  ctx.arc(cx + Math.cos(endAngle) * R, cy + Math.sin(endAngle) * R, 3, 0, Math.PI*2);
+  ctx.fillStyle = color; ctx.fill();
+}
+
+function drawAllKnobs() {
+  drawKnob('knob-l-bass', deckL.bass, '#00f5ff');
+  drawKnob('knob-l-mid', deckL.mid, '#00f5ff');
+  drawKnob('knob-l-hi', deckL.hi, '#00f5ff');
+
+  drawKnob('knob-r-bass', deckR.volume, '#ff0080');
+  drawKnob('knob-r-mid', deckR.fxDry, '#ff0080');
+  drawKnob('knob-r-hi', deckR.delayTime / 0.8, '#ff0080');
+}
+
+// ════════════════════════════════════════════════════════
+// VU METER
+// ════════════════════════════════════════════════════════
+function buildVU(containerId, color) {
+  const cont = document.getElementById(containerId);
+  for (let i = 0; i < 8; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'vu-bar';
+    bar.style.background = i < 5 ? color : i < 7 ? '#ffaa00' : '#ff0040';
+    bar.style.height = '2px';
+    cont.appendChild(bar);
+  }
+}
+
+function updateVU(side, volume) {
+  const cont = document.getElementById(`vu-${side}`);
+  const bars = cont.querySelectorAll('.vu-bar');
+  bars.forEach((bar, i) => {
+    const target = i / 7 < volume ? Math.max(4, 20 - i * 2) : 2;
+    bar.style.height = `${target}px`;
+  });
+}
+
+buildVU('vu-l', '#00f5ff');
+buildVU('vu-r', '#ff0080');
+
+// ════════════════════════════════════════════════════════
+// OSCILLOSCOPE
+// ════════════════════════════════════════════════════════
+const oscBuffers = { l: new Float32Array(256).fill(0), r: new Float32Array(256).fill(0) };
+const oscDirty = { l: true, r: true };
+let oscPhase = 0;
+
+function updateOscBuffer(side, deck) {
+  const buf = oscBuffers[side];
+  oscPhase += 0.15;
+  const isRunning = SEQ[side].running;
+  const vol = deck.volume;
+  
+  for (let i = 0; i < buf.length; i++) {
+    const t = i / buf.length;
+    if (isRunning) {
+      buf[i] = Math.sin(t * Math.PI * 8 + oscPhase) * 0.4 * vol
+             + Math.sin(t * Math.PI * 16 + oscPhase * 1.3) * 0.2 * vol
+             + (Math.random() - 0.5) * 0.04 * vol;
+    } else {
+      buf[i] = (Math.random() - 0.5) * 0.008;
+    }
+  }
+}
+
+function drawOsc(canvasId, buffer, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  if (canvas.width !== W) canvas.width = W;
+  if (canvas.height !== H) canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = '#050518'; ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += H/4) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Waveform
+  ctx.beginPath();
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+  buffer.forEach((v, i) => {
+    const x = (i / buffer.length) * W;
+    const y = H/2 - v * H * 0.45;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+// ════════════════════════════════════════════════════════
+// MASTER WAVEFORM
+// ════════════════════════════════════════════════════════
+const masterHistory = new Float32Array(400).fill(0);
+let masterDirty = true;
+
+function drawMaster() {
+  const canvas = document.getElementById('master-canvas');
+  const W = canvas.offsetWidth, H = 64;
+  if (canvas.width !== W) canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Composite of both decks
+  masterHistory.copyWithin(0, 1);
+
+  const isLRunning = SEQ.l.running;
+  const isRRunning = SEQ.r.running;
+  
+  let val = 0;
+  if (isLRunning) val += (Math.sin(Date.now() / 200) * 0.4 + Math.sin(Date.now() / 130) * 0.2) * deckL.volume;
+  if (isRRunning) val += (Math.sin(Date.now() / 150) * 0.4 + Math.sin(Date.now() / 90) * 0.2) * deckR.volume;
+  
+  if (isLRunning || isRRunning) {
+    val += (Math.random() - 0.5) * 0.05;
+  }
+  
+  masterHistory[masterHistory.length - 1] = val / 2;
+
+  const bw = W / masterHistory.length;
+  for (let i = 0; i < masterHistory.length; i++) {
+    const v = masterHistory[i];
+    const h = Math.abs(v) * H * 0.85;
+    const x = i * bw;
+    const ratio = i / masterHistory.length;
+    const r = Math.floor(ratio * 255);
+    const g = Math.floor((1 - ratio) * 255);
+    ctx.fillStyle = `rgba(${r}, ${g}, 255, 0.7)`;
+    ctx.fillRect(x, H/2 - h/2, bw, h);
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// AUDIO PARAMETERS UPDATE (Throttled)
+// ════════════════════════════════════════════════════════
+function updateAudioParameters() {
+  if (!audioCtx) return;
+
+  // Deck A EQ and volume
+  if (deckLNodes) {
+    const bassDb = deckL.bass * 24 - 12;
+    deckLNodes.bassFilter.gain.value = bassDb;
+
+    const midDb = deckL.mid * 24 - 12;
+    deckLNodes.midFilter.gain.value = midDb;
+
+    const hiDb = deckL.hi * 24 - 12;
+    deckLNodes.hiFilter.gain.value = hiDb;
+
+    deckLNodes.gain.gain.value = deckL.volume;
+  }
+
+  // Deck B dry/wet mix, delay, and volume
+  if (deckRNodes) {
+    deckRNodes.gain.gain.value = deckR.volume;
+    deckRNodes.dryGain.gain.value = 1 - deckR.fxDry;
+    deckRNodes.wetGain.gain.value = deckR.fxDry;
+    
+    const dTime = Math.max(0.01, Math.min(0.8, deckR.delayTime));
+    deckRNodes.delay.delayTime.value = dTime;
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// HAND TRACKING STATE
+// ════════════════════════════════════════════════════════
+const handState = {
+  left:  { present: false, x: 0, y: 0, pinch: 0, prevPinch: false },
+  right: { present: false, x: 0, y: 0, pinch: 0, prevPinch: false },
+};
+
+function dist2D(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+// ════════════════════════════════════════════════════════
+// MEDIAPIPE HANDS (Optimized Complexity)
+// ════════════════════════════════════════════════════════
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({ 
+  maxNumHands: 2, 
+  modelComplexity: 0, // Fast model to remove lag
+  minDetectionConfidence: 0.6, 
+  minTrackingConfidence: 0.6 
+});
+
+const handCanvas = document.getElementById('hand-canvas');
+const hCtx = handCanvas.getContext('2d');
+const camCanvas = document.getElementById('cam-canvas');
+const cCtx = camCanvas.getContext('2d');
+
+let firstResult = true;
+
+hands.onResults(results => {
+  const W = camCanvas.width, H = camCanvas.height;
+
+  // Draw cam
+  cCtx.save();
+  cCtx.translate(W, 0); cCtx.scale(-1, 1);
+  cCtx.drawImage(results.image, 0, 0, W, H);
+  cCtx.restore();
+
+  hCtx.clearRect(0, 0, W, H);
+
+  if (firstResult) {
+    firstResult = false;
+    document.getElementById('loading').classList.add('gone');
+    document.getElementById('chip-cam').classList.add('on');
+    document.getElementById('chip-cam-txt').textContent = 'Live';
+  }
+
+  handState.left.present  = false;
+  handState.right.present = false;
+
+  if (!results.multiHandLandmarks) {
+    document.getElementById('no-hand-msg').classList.add('show');
+    return;
+  }
+
+  results.multiHandLandmarks.forEach((lm, idx) => {
+    const handedness = results.multiHandedness?.[idx]?.label;
+    const side  = handedness === 'Left' ? 'right' : 'left';
+    const color = side === 'left' ? '#00f5ff' : '#ff0080';
+    const deck  = side === 'left' ? deckL : deckR;
+
+    const wx = 1 - lm[0].x;
+    const wy = lm[0].y;
+
+    const hs = handState[side];
+    hs.present = true;
+    hs.prevX = hs.x || wx;
+    hs.prevY = hs.y || wy;
+    hs.x = wx; hs.y = wy;
+
+    // Pinch Tip Detection
+    const pinchDist = dist2D(lm[4], lm[8]);
+    hs.pinch = pinchDist;
+    const isPinching = pinchDist < 0.075;
+
+    if (side === 'left') {
+      const bpm = Math.round(80 + wy * 100);
+      deck.bpm = bpm;
+      document.getElementById('bpm-l').textContent = bpm;
+
+      const bassVal = 1 - wx;
+      deck.bass = bassVal;
+      document.getElementById('kv-l-bass').textContent = `${Math.round(bassVal * 24 - 12)}dB`;
+
+      const openness = Math.max(0, 1 - pinchDist * 7);
+      deck.mid = openness;
+      document.getElementById('kv-l-mid').textContent = `${Math.round(openness * 24 - 12)}dB`;
+
+      const hiVal = Math.abs(Math.sin(wy * Math.PI));
+      deck.hi = hiVal;
+      document.getElementById('kv-l-hi').textContent = `${Math.round(hiVal * 24 - 12)}dB`;
+
+      // Draw knobs instantly for immediate feedback
+      drawKnob('knob-l-bass', bassVal, color);
+      drawKnob('knob-l-mid', openness, color);
+      drawKnob('knob-l-hi', hiVal, color);
+
+      if (isPinching && !hs.prevPinch) {
+        ensureAudio();
+        if (!SEQ.l.running) {
+          startSequencer(deck, 'l');
+        } else {
+          stopSequencer('l');
+        }
+      }
+
+      const gst = document.getElementById('gs-l');
+      gst.textContent = `L: BPM ${bpm} · ${isPinching ? '● PINCH — LOOP TOGGLE' : 'Y=BPM · X=BASS'}`;
+      gst.className = `gesture-status active-l`;
+
+    } else {
+      const vol = Math.max(0, Math.min(1, 1 - wy));
+      deck.volume = vol;
+      document.getElementById('kv-r-bass').textContent = `${Math.round(vol * 100)}%`;
+
+      const fxDry = wx;
+      deck.fxDry = fxDry;
+      document.getElementById('kv-r-mid').textContent = `${Math.round(fxDry * 100)}%`;
+
+      const delayT = Math.max(0.01, wy * 0.8);
+      deck.delayTime = delayT;
+      document.getElementById('kv-r-hi').textContent = `${delayT.toFixed(2)}s`;
+
+      // Draw knobs instantly for immediate feedback
+      drawKnob('knob-r-bass', vol, color);
+      drawKnob('knob-r-mid', fxDry, color);
+      drawKnob('knob-r-hi', delayT / 0.8, color);
+
+      if (isPinching && !hs.prevPinch) {
+        ensureAudio();
+        if (!SEQ.r.running) {
+          startSequencer(deck, 'r');
+        } else {
+          stopSequencer('r');
+        }
+      }
+
+      const gst = document.getElementById('gs-r');
+      gst.textContent = `R: VOL ${Math.round(vol*100)}% · ${isPinching ? '● PINCH — DROP TOGGLE' : 'Y=VOL · X=FX'}`;
+      gst.className = `gesture-status active-r`;
+    }
+
+    hs.prevPinch = isPinching;
+
+    // ── DRAW HAND SKELETON (Contiguous Path Optimization) ──
+    hCtx.save();
+    hCtx.beginPath();
+    HAND_CONNECTIONS.forEach(([a, b]) => {
+      const ax = (1 - lm[a].x) * W, ay = lm[a].y * H;
+      const bx = (1 - lm[b].x) * W, by = lm[b].y * H;
+      hCtx.moveTo(ax, ay); hCtx.lineTo(bx, by);
+    });
+    hCtx.strokeStyle = color + 'aa';
+    hCtx.lineWidth = 2;
+    hCtx.stroke();
+
+    // Draw joints fast
+    lm.forEach((pt, i) => {
+      const isTip = [4,8,12,16,20].includes(i);
+      const px = (1 - pt.x) * W, py = pt.y * H;
+      hCtx.beginPath();
+      hCtx.arc(px, py, isTip ? 4 : 2, 0, Math.PI*2);
+      hCtx.fillStyle = isTip ? color : color + '77';
+      hCtx.fill();
+    });
+
+    // Pinch beam
+    const t4x = (1 - lm[4].x) * W, t4y = lm[4].y * H;
+    const t8x = (1 - lm[8].x) * W, t8y = lm[8].y * H;
+    const pinchAlpha = Math.max(0, 1 - pinchDist * 12);
+    hCtx.beginPath(); hCtx.moveTo(t4x, t4y); hCtx.lineTo(t8x, t8y);
+    hCtx.strokeStyle = `${color}${Math.round(pinchAlpha * 255).toString(16).padStart(2,'0')}`;
+    hCtx.lineWidth = 1.5 + pinchAlpha * 3;
+    hCtx.stroke();
+
+    // Wrist tracking helper line
+    hCtx.beginPath();
+    hCtx.moveTo(0, lm[0].y * H);
+    hCtx.lineTo(W, lm[0].y * H);
+    hCtx.strokeStyle = `${color}14`;
+    hCtx.lineWidth = 1; hCtx.setLineDash([4, 6]); hCtx.stroke();
+    hCtx.setLineDash([]);
+
+    hCtx.restore();
+
+    // Chips
+    document.getElementById(`chip-${side}`).classList.add('on');
+    document.getElementById(`chip-${side}-txt`).textContent = `${side === 'left' ? 'L' : 'R'}: ${isPinching ? 'PINCH' : 'ACTIVE'}`;
+  });
+
+  const anyHand = handState.left.present || handState.right.present;
+  document.getElementById('no-hand-msg').classList.toggle('show', !anyHand);
+  document.getElementById('instructions').style.opacity = anyHand ? '0' : '0.7';
+
+  if (!handState.left.present)  {
+    document.getElementById('chip-l').classList.remove('on');
+    document.getElementById('chip-l-txt').textContent = 'L Hand';
+  }
+  if (!handState.right.present) {
+    document.getElementById('chip-r').classList.remove('on');
+    document.getElementById('chip-r-txt').textContent = 'R Hand';
+  }
+
+  // Bind Web Audio parameters to computed hand gestures
+  updateAudioParameters();
+});
+
+// ════════════════════════════════════════════════════════
+// ANIMATION LOOP (Fully Optimized)
+// ════════════════════════════════════════════════════════
+function renderLoop() {
+  requestAnimationFrame(renderLoop);
+
+  // Render Vinyls only when running or dirty
+  if (SEQ.l.running || vinylState.l.dirty) {
+    drawVinyl('l', deckL);
+    vinylState.l.dirty = false;
+  }
+  if (SEQ.r.running || vinylState.r.dirty) {
+    drawVinyl('r', deckR);
+    vinylState.r.dirty = false;
+  }
+
+  // Render Oscilloscopes only when running or dirty
+  if (SEQ.l.running || oscDirty.l) {
+    updateOscBuffer('l', deckL);
+    drawOsc('osc-l', oscBuffers.l, '#00f5ff');
+    oscDirty.l = false;
+  }
+  if (SEQ.r.running || oscDirty.r) {
+    updateOscBuffer('r', deckR);
+    drawOsc('osc-r', oscBuffers.r, '#ff0080');
+    oscDirty.r = false;
+  }
+
+  // Render Master Waveform only when running or dirty
+  if (SEQ.l.running || SEQ.r.running || masterDirty) {
+    drawMaster();
+    masterDirty = false;
+  }
+
+  // Real-time VU Meters fluctuation
+  updateVU('l', deckL.volume * (SEQ.l.running ? 0.7 + Math.random() * 0.3 : 0));
+  updateVU('r', deckR.volume * (SEQ.r.running ? 0.7 + Math.random() * 0.3 : 0));
+}
+
+// ════════════════════════════════════════════════════════
+// CAMERA + MEDIAPIPE INIT (Low latency 480p Ideal Resolution)
+// ════════════════════════════════════════════════════════
+const video = document.getElementById('video');
+
+async function startCamera() {
+  document.getElementById('load-msg').textContent = 'Requesting camera…';
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }
+  });
+  video.srcObject = stream;
+  await new Promise(r => video.onloadedmetadata = r);
+  video.play();
+  camCanvas.width  = handCanvas.width  = video.videoWidth;
+  camCanvas.height = handCanvas.height = video.videoHeight;
+
+  document.getElementById('load-msg').textContent = 'Calibrating hand model…';
+
+  const mpCam = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: video.videoWidth, height: video.videoHeight,
+  });
+  mpCam.start();
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  ensureAudio();
+  if (e.key === 'q' || e.key === 'Q') {
+    SEQ.l.running ? stopSequencer('l') : startSequencer(deckL, 'l');
+  }
+  if (e.key === 'p' || e.key === 'P') {
+    SEQ.r.running ? stopSequencer('r') : startSequencer(deckR, 'r');
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (SEQ.l.running || SEQ.r.running) {
+      stopSequencer('l');
+      stopSequencer('r');
+    } else {
+      startSequencer(deckL, 'l');
+      startSequencer(deckR, 'r');
+    }
+  }
+  if (e.key === 'Escape') {
+    stopSequencer('l');
+    stopSequencer('r');
+  }
+});
+
+document.addEventListener('click', () => ensureAudio(), { once: true });
+
+// Boot
+window.addEventListener('load', async () => {
+  drawAllKnobs();
+  renderLoop();
+  try {
+    await startCamera();
+  } catch(err) {
+    document.getElementById('loading').innerHTML = `
+      <div style="font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:900;color:#00f5ff;letter-spacing:0.2em">NO SIGNAL</div>
+      <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#777;letter-spacing:0.12em;margin-top:0.5rem;text-align:center;max-width:320px">${err.message}</div>
+      <div style="font-size:0.55rem;color:#444;margin-top:1.2rem;letter-spacing:0.1em;text-transform:uppercase">Allow camera access and reload</div>`;
+  }
+});
+</script>
+</body>
+</html>
